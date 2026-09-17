@@ -36,32 +36,47 @@ async function createSession(env) {
   return code;
 }
 
-
 /*
  * GET /
  *
  * Nếu chưa có ?code=
  * → tạo số tự nhiên mới
  * → chuyển thành /?code=123456
+ *
+ * Nếu có ?code=...&hash=...
+ * → xác minh hash với Linkvertise
  */
 app.get("/", async (c) => {
   const url = new URL(c.req.url);
-  const code = url.searchParams.get("code");
 
+  const code = url.searchParams.get("code");
+  const hash = url.searchParams.get("hash");
+
+  /*
+   * Không có code:
+   * tạo session mới.
+   */
   if (!code) {
     const newCode = await createSession(c.env);
 
     url.searchParams.set("code", newCode);
+    url.searchParams.delete("hash");
 
     return c.redirect(url.toString(), 302);
   }
 
+  /*
+   * Code không hợp lệ.
+   */
   if (!validCode(code)) {
     return c.env.ASSETS.fetch(
       new Request(new URL("/404.html", c.req.url))
     );
   }
 
+  /*
+   * Lấy session.
+   */
   const session = await c.env.SESSIONS.get(
     `session:${code}`,
     "json"
@@ -73,9 +88,92 @@ app.get("/", async (c) => {
     );
   }
 
+  /*
+   * Nếu Linkvertise redirect về với hash,
+   * tiến hành xác minh.
+   */
+  if (hash) {
+    /*
+     * Kiểm tra token trước khi gọi API.
+     */
+    if (!c.env.LINKVERTISE_TOKEN) {
+      return c.json(
+        {
+          ok: false,
+          error: "Linkvertise token is not configured."
+        },
+        500
+      );
+    }
+
+    const verifyUrl =
+      "https://publisher.linkvertise.com/api/v1/anti_bypassing";
+
+    let response;
+
+    try {
+      response = await fetch(
+        `${verifyUrl}?token=${encodeURIComponent(
+          c.env.LINKVERTISE_TOKEN
+        )}&hash=${encodeURIComponent(hash)}`,
+        {
+          method: "POST"
+        }
+      );
+    } catch {
+      return c.json(
+        {
+          ok: false,
+          error: "Unable to contact Linkvertise."
+        },
+        502
+      );
+    }
+
+    /*
+     * Hash không hợp lệ hoặc đã hết hạn.
+     */
+    if (!response.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: "Linkvertise verification failed."
+        },
+        403
+      );
+    }
+
+    /*
+     * Hash hợp lệ.
+     * Đánh dấu session đã xác minh.
+     */
+    await c.env.SESSIONS.put(
+      `session:${code}`,
+      JSON.stringify({
+        ...session,
+        verified: true,
+        verifiedAt: Date.now()
+      }),
+      {
+        expirationTtl: SESSION_TTL
+      }
+    );
+
+    /*
+     * Xóa hash khỏi URL sau khi xác minh.
+     */
+    return c.redirect(
+      `/?code=${encodeURIComponent(code)}`,
+      302
+    );
+  }
+
+  /*
+   * Không có hash:
+   * chỉ trả trang giao diện.
+   */
   return c.env.ASSETS.fetch(c.req.raw);
 });
-
 
 /*
  * POST /api/get-code
@@ -86,6 +184,9 @@ app.post("/api/get-code", async (c) => {
   const url = new URL(c.req.url);
   const code = url.searchParams.get("code");
 
+  /*
+   * Kiểm tra code.
+   */
   if (!code || !validCode(code)) {
     return c.json(
       {
@@ -96,6 +197,9 @@ app.post("/api/get-code", async (c) => {
     );
   }
 
+  /*
+   * Lấy session.
+   */
   const session = await c.env.SESSIONS.get(
     `session:${code}`,
     "json"
@@ -112,8 +216,8 @@ app.post("/api/get-code", async (c) => {
   }
 
   /*
-   * Nếu đã xác minh rồi thì không cần
-   * đi qua Linkvertise lần nữa.
+   * Nếu session đã xác minh,
+   * không cần đi qua Linkvertise lần nữa.
    */
   if (session.verified === true) {
     return c.json({
@@ -124,13 +228,7 @@ app.post("/api/get-code", async (c) => {
   }
 
   /*
-   * Linkvertise Target-Link.
-   *
-   * Sau này đặt URL thật ở:
-   * Cloudflare → Variables and Secrets
-   *
-   * Name:
-   * LINKVERTISE_URL
+   * Kiểm tra Linkvertise URL.
    */
   if (!c.env.LINKVERTISE_URL) {
     return c.json(
@@ -142,12 +240,15 @@ app.post("/api/get-code", async (c) => {
     );
   }
 
+  /*
+   * Tạo URL Linkvertise.
+   */
   const linkvertiseUrl = new URL(
     c.env.LINKVERTISE_URL
   );
 
   /*
-   * Gắn session code vào Target-Link.
+   * Gắn session code.
    */
   linkvertiseUrl.searchParams.set(
     "code",
@@ -161,12 +262,12 @@ app.post("/api/get-code", async (c) => {
   });
 });
 
-
 /*
- * GET /?code=123456&hash=xxxxx
+ * GET /verify
  *
- * Linkvertise redirect về đây sau khi
- * người dùng hoàn thành ad-step.
+ * Giữ endpoint này để tương thích nếu
+ * Linkvertise được cấu hình Target-Link
+ * tới /verify.
  */
 app.get("/verify", async (c) => {
   const url = new URL(c.req.url);
@@ -199,20 +300,39 @@ app.get("/verify", async (c) => {
     );
   }
 
-  /*
-    * Xác minh hash với Linkvertise. 
-   */
+  if (!c.env.LINKVERTISE_TOKEN) {
+    return c.json(
+      {
+        ok: false,
+        error: "Linkvertise token is not configured."
+      },
+      500
+    );
+  }
+
   const verifyUrl =
     "https://publisher.linkvertise.com/api/v1/anti_bypassing";
 
-  const response = await fetch(
-    `${verifyUrl}?token=${encodeURIComponent(
-      c.env.LINKVERTISE_TOKEN
-    )}&hash=${encodeURIComponent(hash)}`,
-    {
-      method: "POST"
-    }
-  );
+  let response;
+
+  try {
+    response = await fetch(
+      `${verifyUrl}?token=${encodeURIComponent(
+        c.env.LINKVERTISE_TOKEN
+      )}&hash=${encodeURIComponent(hash)}`,
+      {
+        method: "POST"
+      }
+    );
+  } catch {
+    return c.json(
+      {
+        ok: false,
+        error: "Unable to contact Linkvertise."
+      },
+      502
+    );
+  }
 
   if (!response.ok) {
     return c.json(
@@ -224,52 +344,43 @@ app.get("/verify", async (c) => {
     );
   }
 
-  /*
-    * Hash hợp lệ. 
-272
-  đang chờ c.env. SESSIONS.put(  
- Phiên: ${code}`, 
- }.stringify({ 
-         ... Phiên họphọp,  
-       xác minh minh:  Đúng vậy. vậy., 
-       Xác minh tại minh tại:  Ngày.Bây giờ() 
-     }), 
-     { 
-       Tát tántán:  Phiên_ttl.allPhiên_ttl"*", async (c) => { 
-      trả  lại c.env. Tài sản.viết tay(c.req.raw);  
-   });; 
+  await c.env.SESSIONS.put(
+    `session:${code}`,
+    JSON.stringify({
+      ...session,
+      verified: true,
+      verifiedAt: Date.now()
+    }),
+    {
+      expirationTtl: SESSION_TTL
+    }
+  );
 
-   /* 
-     * Quay lại trang với session code.  
-      */     
-     Trở      Trở    lạiC..Chuyển  hướng   hướng(
-    `/?code=${)(
-         phần     
-(
+  return c.redirect(
+    `/?code=${encodeURIComponent(code)}`,
+    302
+  );
 });
 
-
-227
-228
-229
+/*
+ * Các API endpoint không tồn tại.
+ */
 app.all("/api/*", (c) => {
-230
-231
-232
-233
-(
-tất cả
-.
+  return c.json(
+    {
+      ok: false,
+      error: "API endpoint not found."
+    },
+    404
+  );
 });
 
+/*
+ * Các file còn lại giao cho Assets.
+ * 404.html vẫn hoạt động.
+ */
+app.all("*", async (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
 
-  :    
-    * Các file còn lại giao cho Assets.  
-    * 404.html vẫn hoạt động.  
-   */ 
-Phiên_ttl
-}
-)
-
-
-236
+export default app;
