@@ -1,37 +1,10 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "git-showcase-p4q2ivxwtwjeus5n9hcsp",
+  "name": "moonactivation",
   "main": "worker/index.js",
   "compatibility_date": "2025-04-24",
 
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "moon501github-db",
-      "database_id": "76f98924-1fab-4af7-b000-238bb587399b"
-    }
-  ],
-
-"kv_namespaces": [
-  {
-    "binding": "K1",
-    "id": "ddf3760a1b814a72805bfb9c1d8b6d7d"
-  }
-],
-
-"ratelimits": [
-  {
-    "name": "RATE_LIMITER",
-    "namespace_id": "1001",
-    "simple": {
-      "limit": 5,
-      "period": 60
-    }
-  }
-],
-
   "assets": {
-    "not_found_handling": "404-page",
-    "directory": "./public"
+    "directory": "./public",
+    "binding": "ASSETS"
   }
 }
