@@ -6,5 +6,12 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"
-  }
+  },
+
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      "id": "THAY_BANG_KV_NAMESPACE_ID_CUA_M"
+    }
+  ]
 }
