@@ -408,7 +408,7 @@ app.get(
       `https://moon501access.moon10512344.workers.dev/?code=${code}`;
 
     return c.json({
-      ok: true,
+      success: true,
       code,
       url: activationUrl
     });
