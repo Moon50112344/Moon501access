@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 const app = new Hono();
 
-const SESSION_TTL = 15 * 60; // 15 minutes
+const SESSION_TTL = 15 * 60;
 const COOKIE_NAME = "moon_activation_code";
 
 function validCode(code) {
@@ -21,7 +21,6 @@ function generateActivationKey() {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
   const array = new Uint32Array(16);
-
   crypto.getRandomValues(array);
 
   let raw = "";
@@ -34,28 +33,31 @@ function generateActivationKey() {
 }
 
 function getCookie(request, name) {
-  const cookieHeader = request.headers.get("Cookie");
+  const cookieHeader =
+    request.headers.get("Cookie");
 
   if (!cookieHeader) {
     return null;
   }
 
-  const cookies = cookieHeader.split(";");
+  const cookies =
+    cookieHeader.split(";");
 
   for (const cookie of cookies) {
-    const separator = cookie.indexOf("=");
+    const separator =
+      cookie.indexOf("=");
 
     if (separator === -1) {
       continue;
     }
 
-    const key = cookie
-      .slice(0, separator)
-      .trim();
+    const key =
+      cookie.slice(0, separator).trim();
 
-    const value = cookie
-      .slice(separator + 1)
-      .trim();
+    const value =
+      cookie
+        .slice(separator + 1)
+        .trim();
 
     if (key === name) {
       return decodeURIComponent(value);
@@ -73,17 +75,6 @@ function createCodeCookie(code) {
     "Secure",
     "SameSite=Lax",
     `Max-Age=${SESSION_TTL}`
-  ].join("; ");
-}
-
-function clearCodeCookie() {
-  return [
-    `${COOKIE_NAME}=`,
-    "Path=/",
-    "HttpOnly",
-    "Secure",
-    "SameSite=Lax",
-    "Max-Age=0"
   ].join("; ");
 }
 
@@ -117,7 +108,10 @@ async function createRandomSession(env) {
     }
   } while (true);
 
-  await createSession(env, code);
+  await createSession(
+    env,
+    code
+  );
 
   return code;
 }
@@ -179,14 +173,17 @@ async function verifyLinkvertiseHash(
     "https://publisher.linkvertise.com/api/v1/anti_bypassing";
 
   try {
-    const response = await fetch(
-      `${verifyUrl}?token=${encodeURIComponent(
-        env.LINKVERTISE_TOKEN
-      )}&hash=${encodeURIComponent(hash)}`,
-      {
-        method: "POST"
-      }
-    );
+    const response =
+      await fetch(
+        `${verifyUrl}?token=${encodeURIComponent(
+          env.LINKVERTISE_TOKEN
+        )}&hash=${encodeURIComponent(
+          hash
+        )}`,
+        {
+          method: "POST"
+        }
+      );
 
     if (!response.ok) {
       return {
@@ -200,6 +197,7 @@ async function verifyLinkvertiseHash(
     return {
       ok: true
     };
+
   } catch {
     return {
       ok: false,
@@ -210,11 +208,14 @@ async function verifyLinkvertiseHash(
   }
 }
 
-/*
- * Main website route.
- */
+// ========================================
+// Home
+// ========================================
+
 app.get("/", async (c) => {
-  const url = new URL(c.req.url);
+
+  const url =
+    new URL(c.req.url);
 
   const code =
     url.searchParams.get("code");
@@ -222,15 +223,9 @@ app.get("/", async (c) => {
   const hash =
     url.searchParams.get("hash");
 
-  /*
-   * Linkvertise returns only:
-   *
-   * ?hash=...
-   *
-   * The activation code is recovered
-   * from the secure session cookie.
-   */
+  // Linkvertise returns ?hash=...
   if (hash && !code) {
+
     const cookieCode =
       getCookie(
         c.req.raw,
@@ -277,7 +272,8 @@ app.get("/", async (c) => {
       return c.json(
         {
           ok: false,
-          error: verification.error
+          error:
+            verification.error
         },
         verification.status
       );
@@ -303,50 +299,55 @@ app.get("/", async (c) => {
       }
     );
 
-    /*
-     * Remove the hash from the URL.
-     * Keep the activation code.
-     */
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location:
-          `/?code=${encodeURIComponent(
-            cookieCode
-          )}`,
-        "Set-Cookie":
-          createCodeCookie(cookieCode)
+    return new Response(
+      null,
+      {
+        status: 302,
+        headers: {
+          Location:
+            `/?code=${encodeURIComponent(
+              cookieCode
+            )}`,
+
+          "Set-Cookie":
+            createCodeCookie(
+              cookieCode
+            )
+        }
       }
-    });
+    );
   }
 
-  /*
-   * No code:
-   * create a new activation session.
-   */
+  // No code → create a new session
   if (!code) {
+
     const newCode =
       await createRandomSession(
         c.env
       );
 
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location:
-          `/?code=${encodeURIComponent(
-            newCode
-          )}`,
-        "Set-Cookie":
-          createCodeCookie(newCode)
+    return new Response(
+      null,
+      {
+        status: 302,
+        headers: {
+          Location:
+            `/?code=${encodeURIComponent(
+              newCode
+            )}`,
+
+          "Set-Cookie":
+            createCodeCookie(
+              newCode
+            )
+        }
       }
-    });
+    );
   }
 
-  /*
-   * Validate activation code.
-   */
+  // Invalid code
   if (!validCode(code)) {
+
     return c.env.ASSETS.fetch(
       new Request(
         new URL(
@@ -357,19 +358,14 @@ app.get("/", async (c) => {
     );
   }
 
-  /*
-   * Get session.
-   */
   let session =
     await c.env.SESSIONS.get(
       `session:${code}`,
       "json"
     );
 
-  /*
-   * Create session if necessary.
-   */
   if (!session) {
+
     await createSession(
       c.env,
       code
@@ -382,9 +378,6 @@ app.get("/", async (c) => {
     };
   }
 
-  /*
-   * Keep the current code in the cookie.
-   */
   const response =
     await c.env.ASSETS.fetch(
       c.req.raw
@@ -398,12 +391,38 @@ app.get("/", async (c) => {
   return response;
 });
 
-/*
- * Request an activation code.
- */
+// ========================================
+// API: Create activation session
+// ========================================
+
+app.get(
+  "/api/session",
+  async (c) => {
+
+    const code =
+      await createRandomSession(
+        c.env
+      );
+
+    const activationUrl =
+      `https://moon501access.moon10512344.workers.dev/?code=${code}`;
+
+    return c.json({
+      ok: true,
+      code,
+      url: activationUrl
+    });
+  }
+);
+
+// ========================================
+// API: Get code
+// ========================================
+
 app.post(
   "/api/get-code",
   async (c) => {
+
     const url =
       new URL(c.req.url);
 
@@ -412,10 +431,6 @@ app.post(
         "code"
       );
 
-    /*
-     * If no code was supplied,
-     * recover it from the cookie.
-     */
     if (!code) {
       code =
         getCookie(
@@ -445,6 +460,7 @@ app.post(
       );
 
     if (!session) {
+
       await createSession(
         c.env,
         code
@@ -457,9 +473,6 @@ app.post(
       };
     }
 
-    /*
-     * Already verified.
-     */
     if (
       session.verified === true
     ) {
@@ -473,9 +486,6 @@ app.post(
       });
     }
 
-    /*
-     * Linkvertise URL required.
-     */
     if (!c.env.LINKVERTISE_URL) {
       return c.json(
         {
@@ -487,13 +497,6 @@ app.post(
       );
     }
 
-    /*
-     * Create Linkvertise URL.
-     *
-     * The code is NOT required to be
-     * returned by Linkvertise.
-     * It is stored in the cookie.
-     */
     const linkvertiseUrl =
       new URL(
         c.env.LINKVERTISE_URL
@@ -516,6 +519,7 @@ app.post(
         headers: {
           "Content-Type":
             "application/json",
+
           "Set-Cookie":
             createCodeCookie(code)
         }
@@ -524,12 +528,14 @@ app.post(
   }
 );
 
-/*
- * Compatibility verification endpoint.
- */
+// ========================================
+// Verify Linkvertise
+// ========================================
+
 app.get(
   "/verify",
   async (c) => {
+
     const url =
       new URL(c.req.url);
 
@@ -629,12 +635,14 @@ app.get(
   }
 );
 
-/*
- * Return activation key.
- */
+// ========================================
+// API: Get activation key
+// ========================================
+
 app.get(
   "/api/key",
   async (c) => {
+
     const url =
       new URL(c.req.url);
 
@@ -714,9 +722,10 @@ app.get(
   }
 );
 
-/*
- * Unknown API endpoints.
- */
+// ========================================
+// Unknown API
+// ========================================
+
 app.all(
   "/api/*",
   (c) => {
@@ -731,9 +740,10 @@ app.all(
   }
 );
 
-/*
- * Static assets and other routes.
- */
+// ========================================
+// Assets
+// ========================================
+
 app.all(
   "*",
   async (c) => {
