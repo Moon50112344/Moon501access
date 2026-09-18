@@ -147,10 +147,7 @@ async function createActivationKey(
       key: activationKey,
       code,
       createdAt: Date.now()
-    }),
-    {
-      expirationTtl: SESSION_TTL
-    }
+    })
   );
 
   return activationKey;
@@ -719,6 +716,84 @@ app.get(
       key:
         session.activationKey
     });
+  }
+);
+
+// ========================================
+// API: Verify activation key
+// ========================================
+
+app.post(
+  "/api/verify-key",
+  async (c) => {
+
+    try {
+
+      const body =
+        await c.req.json();
+
+      const key =
+        String(body?.key || "")
+          .trim()
+          .toUpperCase();
+
+      if (
+        !/^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/.test(
+          key
+        )
+      ) {
+        return c.json(
+          {
+            success: false,
+            valid: false,
+            error:
+              "Invalid activation key."
+          },
+          400
+        );
+      }
+
+      const record =
+        await c.env.SESSIONS.get(
+          `key:${key}`,
+          "json"
+        );
+
+      if (!record) {
+        return c.json(
+          {
+            success: false,
+            valid: false,
+            error:
+              "Invalid activation key."
+          },
+          404
+        );
+      }
+
+      return c.json({
+        success: true,
+        valid: true,
+        key
+      });
+
+    } catch (error) {
+
+      console.error(
+        "verify-key error:",
+        error
+      );
+
+      return c.json(
+        {
+          success: false,
+          valid: false,
+          error:
+            "Unable to verify activation key."
+        },
+        500
+      );
+    }
   }
 );
 
