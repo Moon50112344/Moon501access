@@ -11,8 +11,17 @@ function hideError() {
   errorMessage.classList.add("hidden");
 }
 
-function createKeyElement(key) {
+function showActivationKey(key) {
+  const existing =
+    document.getElementById("activation-key-container");
+
+  if (existing) {
+    existing.remove();
+  }
+
   const container = document.createElement("div");
+
+  container.id = "activation-key-container";
 
   container.className =
     "mt-6 rounded-xl bg-slate-950/60 border border-slate-800 p-5";
@@ -55,34 +64,15 @@ function createKeyElement(key) {
         copyButton.textContent = "Copy key";
       }, 1500);
     } catch {
-      copyButton.textContent = "Copy failed";
-
-      setTimeout(() => {
-        copyButton.textContent = "Copy key";
-      }, 1500);
+      showError("Unable to copy key.");
     }
   });
 
   keyBox.appendChild(keyText);
+
   container.appendChild(title);
   container.appendChild(keyBox);
   container.appendChild(copyButton);
-
-  return container;
-}
-
-function showActivationKey(key) {
-  const existing = document.getElementById(
-    "activation-key-container"
-  );
-
-  if (existing) {
-    existing.remove();
-  }
-
-  const container = createKeyElement(key);
-
-  container.id = "activation-key-container";
 
   button.parentElement.insertBefore(
     container,
@@ -94,31 +84,175 @@ function showActivationKey(key) {
 
 async function getActivationKey(code) {
   const response = await fetch(
-    `/api/key?code=${encodeURIComponent(code)}`
+    `/api/key?code=${encodeURIComponent(code)}`,
+    {
+      method: "GET",
+      cache: "no-store"
+    }
   );
 
   const data = await response.json();
 
   if (!response.ok || !data.ok || !data.key) {
     throw new Error(
-      data.error || "Activation key could not be retrieved."
+      data.error ||
+        "Activation key could not be retrieved."
     );
   }
 
   return data.key;
 }
 
+/*
+ * Handle the hash returned by Linkvertise.
+ *
+ * Linkvertise returns:
+ *
+ * /?hash=...
+ *
+ * The Worker uses the secure session cookie
+ * to identify the activation code.
+ */
+async function handleVerification(hash) {
+  try {
+    const response = await fetch(
+      `/verify?hash=${encodeURIComponent(hash)}`,
+      {
+        method: "GET",
+        redirect: "follow",
+        cache: "no-store"
+      }
+    );
+
+    /*
+     * If the Worker redirected us to:
+     *
+     * /?code=123456
+     *
+     * follow that URL.
+     */
+    if (response.redirected) {
+      window.location.replace(response.url);
+      return;
+    }
+
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.error ||
+            "Linkvertise verification failed."
+        );
+      }
+
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        "Linkvertise verification failed."
+      );
+    }
+  } catch (error) {
+    console.error(error);
+
+    showError(
+      error.message ||
+        "Verification failed."
+    );
+
+    button.disabled = false;
+    button.textContent = "Get code";
+  }
+}
+
+/*
+ * Check whether the current session
+ * already has an activation key.
+ */
+async function checkExistingKey(code) {
+  try {
+    const key =
+      await getActivationKey(code);
+
+    showActivationKey(key);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/*
+ * Get a new Linkvertise redirect.
+ */
+async function requestLinkvertise(code) {
+  const response = await fetch(
+    `/api/get-code?code=${encodeURIComponent(code)}`,
+    {
+      method: "POST",
+      cache: "no-store"
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok || !data.ok) {
+    throw new Error(
+      data.error ||
+        "Unable to continue."
+    );
+  }
+
+  /*
+   * Session already verified.
+   */
+  if (data.verified === true) {
+    const key =
+      data.activationKey ||
+      await getActivationKey(code);
+
+    showActivationKey(key);
+
+    return;
+  }
+
+  /*
+   * Send the user to Linkvertise.
+   */
+  if (data.redirect) {
+    window.location.href = data.redirect;
+    return;
+  }
+
+  throw new Error(
+    "Linkvertise redirect was not provided."
+  );
+}
+
+/*
+ * Get code button.
+ */
 button.addEventListener("click", async () => {
   hideError();
 
-  const params = new URLSearchParams(
-    window.location.search
-  );
+  const params =
+    new URLSearchParams(
+      window.location.search
+    );
 
-  const code = params.get("code");
+  const code =
+    params.get("code");
 
   if (!code || !/^\d{6}$/.test(code)) {
-    showError("Invalid activation session.");
+    showError(
+      "Invalid activation session."
+    );
+
     return;
   }
 
@@ -127,49 +261,18 @@ button.addEventListener("click", async () => {
 
   try {
     /*
-     * Ask the Worker for the current session.
+     * If the session already has a key,
+     * display it instead of starting
+     * Linkvertise again.
      */
-    const response = await fetch(
-      `/api/get-code?code=${encodeURIComponent(code)}`,
-      {
-        method: "POST"
-      }
-    );
+    const alreadyHasKey =
+      await checkExistingKey(code);
 
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(
-        data.error || "Unable to continue."
-      );
-    }
-
-    /*
-     * Already verified.
-     */
-    if (data.verified === true) {
-      if (data.activationKey) {
-        showActivationKey(data.activationKey);
-        return;
-      }
-
-      const key = await getActivationKey(code);
-
-      showActivationKey(key);
+    if (alreadyHasKey) {
       return;
     }
 
-    /*
-     * Redirect to Linkvertise.
-     */
-    if (data.redirect) {
-      window.location.href = data.redirect;
-      return;
-    }
-
-    throw new Error(
-      "Linkvertise redirect was not provided."
-    );
+    await requestLinkvertise(code);
   } catch (error) {
     console.error(error);
 
@@ -182,3 +285,28 @@ button.addEventListener("click", async () => {
     button.textContent = "Get code";
   }
 });
+
+/*
+ * Automatically process Linkvertise
+ * return URL:
+ *
+ * /?hash=...
+ */
+(async () => {
+  const params =
+    new URLSearchParams(
+      window.location.search
+    );
+
+  const hash =
+    params.get("hash");
+
+  if (!hash) {
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Verifying...";
+
+  await handleVerification(hash);
+})();
