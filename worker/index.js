@@ -4,6 +4,7 @@ const app = new Hono();
 
 const SESSION_TTL = 15 * 60;
 const COOKIE_NAME = "moon_activation_code";
+const MAX_KEY_USES = 5;
 
 function validCode(code) {
   return /^\d{6}$/.test(code);
@@ -22,7 +23,6 @@ function generateActivationKey() {
 
   const array = new Uint32Array(16);
   crypto.getRandomValues(array);
-
   let raw = "";
 
   for (const value of array) {
@@ -146,7 +146,8 @@ async function createActivationKey(
     JSON.stringify({
       key: activationKey,
       code,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      uses: 0
     })
   );
 
@@ -194,7 +195,6 @@ async function verifyLinkvertiseHash(
     return {
       ok: true
     };
-
   } catch {
     return {
       ok: false,
@@ -210,7 +210,6 @@ async function verifyLinkvertiseHash(
 // ========================================
 
 app.get("/", async (c) => {
-
   const url =
     new URL(c.req.url);
 
@@ -222,7 +221,6 @@ app.get("/", async (c) => {
 
   // Linkvertise returns ?hash=...
   if (hash && !code) {
-
     const cookieCode =
       getCookie(
         c.req.raw,
@@ -317,7 +315,6 @@ app.get("/", async (c) => {
 
   // No code → create a new session
   if (!code) {
-
     const newCode =
       await createRandomSession(
         c.env
@@ -344,7 +341,6 @@ app.get("/", async (c) => {
 
   // Invalid code
   if (!validCode(code)) {
-
     return c.env.ASSETS.fetch(
       new Request(
         new URL(
@@ -362,7 +358,6 @@ app.get("/", async (c) => {
     );
 
   if (!session) {
-
     await createSession(
       c.env,
       code
@@ -395,7 +390,6 @@ app.get("/", async (c) => {
 app.get(
   "/api/session",
   async (c) => {
-
     const code =
       await createRandomSession(
         c.env
@@ -419,7 +413,6 @@ app.get(
 app.post(
   "/api/get-code",
   async (c) => {
-
     const url =
       new URL(c.req.url);
 
@@ -457,7 +450,6 @@ app.post(
       );
 
     if (!session) {
-
       await createSession(
         c.env,
         code
@@ -532,7 +524,6 @@ app.post(
 app.get(
   "/verify",
   async (c) => {
-
     const url =
       new URL(c.req.url);
 
@@ -639,7 +630,6 @@ app.get(
 app.get(
   "/api/key",
   async (c) => {
-
     const url =
       new URL(c.req.url);
 
@@ -721,14 +711,13 @@ app.get(
 
 // ========================================
 // API: Verify activation key
+// Maximum 5 successful uses per key
 // ========================================
 
 app.post(
   "/api/verify-key",
   async (c) => {
-
     try {
-
       const body =
         await c.req.json();
 
@@ -771,14 +760,56 @@ app.post(
         );
       }
 
+      // ----------------------------------------
+      // Get current usage
+      // ----------------------------------------
+
+      const used =
+        Number(record.uses || 0);
+
+      // ----------------------------------------
+      // Maximum 5 successful uses
+      // ----------------------------------------
+
+      if (used >= MAX_KEY_USES) {
+        return c.json(
+          {
+            success: false,
+            valid: false,
+            error:
+              "Activation key has reached its 5-use limit.",
+            uses: used,
+            remaining: 0
+          },
+          403
+        );
+      }
+
+      // ----------------------------------------
+      // Count successful verification
+      // ----------------------------------------
+
+      const newUses =
+        used + 1;
+
+      await c.env.SESSIONS.put(
+        `key:${key}`,
+        JSON.stringify({
+          ...record,
+          uses: newUses
+        })
+      );
+
       return c.json({
         success: true,
         valid: true,
-        key
+        key,
+        uses: newUses,
+        remaining:
+          MAX_KEY_USES - newUses
       });
 
     } catch (error) {
-
       console.error(
         "verify-key error:",
         error
