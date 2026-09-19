@@ -12,6 +12,10 @@
     {
       "binding": "SESSIONS",
       "id": "d33757f9fda8402bbbeec36023274386"
+    },
+    {
+      "binding": "KEY_USAGE",
+      "id": "d6596beaa299407fbbe2f0d6730c39fc"
     }
   ]
 }
