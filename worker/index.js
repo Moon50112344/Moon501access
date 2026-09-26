@@ -1,10 +1,29 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 
 const app = new Hono();
 
 const SESSION_TTL = 15 * 60;
 const COOKIE_NAME = "moon_activation_code";
 const MAX_KEY_USES = 5;
+
+const ALLOWED_ORIGIN =
+  "https://moon501github.moon10512344.workers.dev";
+
+/*
+ * CORS
+ *
+ * Cho phép web demo Moon501GitHub gọi
+ * Moon501access API từ trình duyệt.
+ */
+app.use(
+  "/api/*",
+  cors({
+    origin: ALLOWED_ORIGIN,
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["Content-Type"],
+  })
+);
 
 function validCode(code) {
   return /^\d{6}$/.test(code);
@@ -23,6 +42,7 @@ function generateActivationKey() {
 
   const array = new Uint32Array(16);
   crypto.getRandomValues(array);
+
   let raw = "";
 
   for (const value of array) {
@@ -74,7 +94,7 @@ function createCodeCookie(code) {
     "HttpOnly",
     "Secure",
     "SameSite=Lax",
-    `Max-Age=${SESSION_TTL}`
+    `Max-Age=${SESSION_TTL}`,
   ].join("; ");
 }
 
@@ -84,10 +104,10 @@ async function createSession(env, code) {
     JSON.stringify({
       code,
       verified: false,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     }),
     {
-      expirationTtl: SESSION_TTL
+      expirationTtl: SESSION_TTL,
     }
   );
 }
@@ -147,7 +167,7 @@ async function createActivationKey(
       key: activationKey,
       code,
       createdAt: Date.now(),
-      uses: 0
+      uses: 0,
     })
   );
 
@@ -163,7 +183,7 @@ async function verifyLinkvertiseHash(
       ok: false,
       status: 500,
       error:
-        "Linkvertise token is not configured."
+        "Linkvertise token is not configured.",
     };
   }
 
@@ -179,7 +199,7 @@ async function verifyLinkvertiseHash(
           hash
         )}`,
         {
-          method: "POST"
+          method: "POST",
         }
       );
 
@@ -188,19 +208,19 @@ async function verifyLinkvertiseHash(
         ok: false,
         status: 403,
         error:
-          "Linkvertise verification failed."
+          "Linkvertise verification failed.",
       };
     }
 
     return {
-      ok: true
+      ok: true,
     };
   } catch {
     return {
       ok: false,
       status: 502,
       error:
-        "Unable to contact Linkvertise."
+        "Unable to contact Linkvertise.",
     };
   }
 }
@@ -235,7 +255,7 @@ app.get("/", async (c) => {
         {
           ok: false,
           error:
-            "Activation session could not be found."
+            "Activation session could not be found.",
         },
         400
       );
@@ -251,7 +271,7 @@ app.get("/", async (c) => {
       return c.json(
         {
           ok: false,
-          error: "Session expired."
+          error: "Session expired.",
         },
         404
       );
@@ -268,7 +288,7 @@ app.get("/", async (c) => {
         {
           ok: false,
           error:
-            verification.error
+            verification.error,
         },
         verification.status
       );
@@ -287,10 +307,10 @@ app.get("/", async (c) => {
         ...session,
         verified: true,
         activationKey,
-        verifiedAt: Date.now()
+        verifiedAt: Date.now(),
       }),
       {
-        expirationTtl: SESSION_TTL
+        expirationTtl: SESSION_TTL,
       }
     );
 
@@ -307,8 +327,8 @@ app.get("/", async (c) => {
           "Set-Cookie":
             createCodeCookie(
               cookieCode
-            )
-        }
+            ),
+        },
       }
     );
   }
@@ -333,8 +353,8 @@ app.get("/", async (c) => {
           "Set-Cookie":
             createCodeCookie(
               newCode
-            )
-        }
+            ),
+        },
       }
     );
   }
@@ -366,7 +386,7 @@ app.get("/", async (c) => {
     session = {
       code,
       verified: false,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
   }
 
@@ -401,7 +421,7 @@ app.get(
     return c.json({
       success: true,
       code,
-      url: activationUrl
+      url: activationUrl,
     });
   }
 );
@@ -437,7 +457,7 @@ app.post(
         {
           ok: false,
           error:
-            "Invalid activation session."
+            "Invalid activation session.",
         },
         400
       );
@@ -458,7 +478,7 @@ app.post(
       session = {
         code,
         verified: false,
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
     }
 
@@ -471,7 +491,7 @@ app.post(
         code,
         activationKey:
           session.activationKey ||
-          null
+          null,
       });
     }
 
@@ -480,7 +500,7 @@ app.post(
         {
           ok: false,
           error:
-            "Linkvertise URL is not configured."
+            "Linkvertise URL is not configured.",
         },
         500
       );
@@ -501,7 +521,7 @@ app.post(
         ok: true,
         verified: false,
         redirect:
-          linkvertiseUrl.toString()
+          linkvertiseUrl.toString(),
       }),
       {
         status: 200,
@@ -510,8 +530,8 @@ app.post(
             "application/json",
 
           "Set-Cookie":
-            createCodeCookie(code)
-        }
+            createCodeCookie(code),
+        },
       }
     );
   }
@@ -554,7 +574,7 @@ app.get(
         {
           ok: false,
           error:
-            "Missing verification data."
+            "Missing verification data.",
         },
         400
       );
@@ -571,7 +591,7 @@ app.get(
         {
           ok: false,
           error:
-            "Session expired."
+            "Session expired.",
         },
         404
       );
@@ -588,7 +608,7 @@ app.get(
         {
           ok: false,
           error:
-            verification.error
+            verification.error,
         },
         verification.status
       );
@@ -607,10 +627,10 @@ app.get(
         ...session,
         verified: true,
         activationKey,
-        verifiedAt: Date.now()
+        verifiedAt: Date.now(),
       }),
       {
-        expirationTtl: SESSION_TTL
+        expirationTtl: SESSION_TTL,
       }
     );
 
@@ -654,7 +674,7 @@ app.get(
         {
           ok: false,
           error:
-            "Invalid activation session."
+            "Invalid activation session.",
         },
         400
       );
@@ -671,7 +691,7 @@ app.get(
         {
           ok: false,
           error:
-            "Session expired."
+            "Session expired.",
         },
         404
       );
@@ -684,7 +704,7 @@ app.get(
         {
           ok: false,
           error:
-            "Activation session has not been verified."
+            "Activation session has not been verified.",
         },
         403
       );
@@ -695,7 +715,7 @@ app.get(
         {
           ok: false,
           error:
-            "Activation key not found."
+            "Activation key not found.",
         },
         404
       );
@@ -704,7 +724,7 @@ app.get(
     return c.json({
       ok: true,
       key:
-        session.activationKey
+        session.activationKey,
     });
   }
 );
@@ -736,7 +756,7 @@ app.post(
             success: false,
             valid: false,
             error:
-              "Invalid activation key."
+              "Invalid activation key.",
           },
           400
         );
@@ -754,23 +774,17 @@ app.post(
             success: false,
             valid: false,
             error:
-              "Invalid activation key."
+              "Invalid activation key.",
           },
           404
         );
       }
 
-      // ----------------------------------------
       // Get current usage
-      // ----------------------------------------
-
       const used =
         Number(record.uses || 0);
 
-      // ----------------------------------------
       // Maximum 5 successful uses
-      // ----------------------------------------
-
       if (used >= MAX_KEY_USES) {
         return c.json(
           {
@@ -779,16 +793,13 @@ app.post(
             error:
               "Activation key has reached its 5-use limit.",
             uses: used,
-            remaining: 0
+            remaining: 0,
           },
           403
         );
       }
 
-      // ----------------------------------------
       // Count successful verification
-      // ----------------------------------------
-
       const newUses =
         used + 1;
 
@@ -796,7 +807,7 @@ app.post(
         `key:${key}`,
         JSON.stringify({
           ...record,
-          uses: newUses
+          uses: newUses,
         })
       );
 
@@ -806,7 +817,7 @@ app.post(
         key,
         uses: newUses,
         remaining:
-          MAX_KEY_USES - newUses
+          MAX_KEY_USES - newUses,
       });
 
     } catch (error) {
@@ -820,7 +831,7 @@ app.post(
           success: false,
           valid: false,
           error:
-            "Unable to verify activation key."
+            "Unable to verify activation key.",
         },
         500
       );
@@ -839,7 +850,7 @@ app.all(
       {
         ok: false,
         error:
-          "API endpoint not found."
+          "API endpoint not found.",
       },
       404
     );
